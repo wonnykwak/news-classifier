@@ -26,7 +26,7 @@ def load_data_labels(path:str) -> tuple[list[str], list[int]]:
 def prepare_data(path: str) -> Tuple[torch.Tensor, torch.Tensor]:
     df = label_df(path)
 
-    headlines = df["headline"]
+    headlines = df["headline"].astype(str).tolist()
     # label: FoxNews=0, NBC=1
     y = df["source"].apply(lambda x: LABEL_MAP.get(str(x).strip(), 0)).tolist()
 
