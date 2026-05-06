@@ -4,3 +4,16 @@ venv/
 
 Newsheadlines/
 .Newsheadlines/
+
+# macOS
+.DS_Store
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Intermediate scraping data and logs
+preprocess/data/headlines_new*.csv
+preprocess/data/headlines_fox_only.csv
+preprocess/data/headlines_overnight*.csv
+preprocess/data/scrape_*.txt
