@@ -8,6 +8,7 @@ from typing import Any, List, Tuple, Dict
 
 import numpy as np
 import torch
+from sklearn.metrics import classification_report
 
 
 def _dynamic_import(module_path: str, module_name: str):
@@ -153,6 +154,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--csv", required=True, help="Path to validation CSV (e.g., url_val.csv)")
     p.add_argument("--weights", default=None, help="Optional path to model checkpoint (e.g., model.pt)")
     p.add_argument("--batch-size", type=int, default=32)
+    p.add_argument("--report", action="store_true", help="Print sklearn classification report (precision/recall/F1)")
     return p.parse_args()
 
 
@@ -175,6 +177,18 @@ def main() -> None:
 
     preds, total_s, avg_ms = _predict_in_batches(model, inputs, batch_size=args.batch_size)
     acc = accuracy_robust(preds, targets)
+
+    if args.report:
+        print(
+            classification_report(
+                targets,
+                preds,
+                labels=[0, 1],
+                target_names=["FoxNews(0)", "NBC(1)"],
+                digits=4,
+                zero_division=0,
+            )
+        )
 
     print(f"num_examples: {len(targets)}")
     print(f"avg_infer_ms: {avg_ms:.3f}")

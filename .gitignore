@@ -5,6 +5,9 @@ venv/
 Newsheadlines/
 .Newsheadlines/
 
+checkpoints/
+.checkpoints/
+
 # macOS
 .DS_Store
 

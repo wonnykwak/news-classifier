@@ -1,10 +1,11 @@
 import torch
 from typing import Tuple
 import pandas as pd
+import os
 from transformers import DistilBertTokenizer
 
 MODEL_NAME = "distilbert-base-uncased"
-MAX_LEN = 64
+MAX_LEN = int(os.getenv("MAX_LEN", "32"))
 
 tokenizer = DistilBertTokenizer.from_pretrained(MODEL_NAME)
 

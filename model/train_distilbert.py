@@ -6,7 +6,12 @@ Train a DistilBERT model for news classification.
 
 from __future__ import annotations
 import argparse
+import sys
 from pathlib import Path
+
+_ROOT = Path(__file__).resolve().parents[1]
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
 import torch
 from sklearn.metrics import accuracy_score, classification_report, f1_score
 from sklearn.model_selection import train_test_split
@@ -120,7 +125,7 @@ def main() -> None:
     model = DistilBertForSequenceClassification.from_pretrained(MODEL_NAME, num_labels=len(LABEL_MAP))
     model.to(device)
     optimizer = AdamW(model.parameters(), lr=args.learning_rate)
-    scheduler = ReduceLROnPlateau(optimizer, mode="max", factor=0.5, patience=1, verbose=True)
+    scheduler = ReduceLROnPlateau(optimizer, mode="max", factor=0.5, patience=1)
 
     best_val_f1 = float("-inf")
 
