@@ -1,13 +1,13 @@
 import torch
 from typing import Tuple
 import pandas as pd
-import os
-from transformers import DistilBertTokenizer
+from transformers import AutoTokenizer
 
-MODEL_NAME = "distilbert-base-uncased"
-MAX_LEN = int(os.getenv("MAX_LEN", "32"))
+# MODEL_NAME = "distilbert-base-uncased" # YOU NEED TO UNCOMMENT TO RUN THE MODEL
+MODEL_NAME = "roberta-base"
+MAX_LEN = 32
 
-tokenizer = DistilBertTokenizer.from_pretrained(MODEL_NAME)
+tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
 
 LABEL_MAP = {"FoxNews": 0, "NBC": 1}
 

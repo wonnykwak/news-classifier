@@ -1,26 +1,18 @@
 import torch
 from torch import nn
 from typing import Any, Iterable, List
-from transformers import DistilBertForSequenceClassification
+import os
+from transformers import AutoModelForSequenceClassification
 
 
 class Model(nn.Module):
-    """
-    Template model for the leaderboard.
-
-    Requirements:
-    - Must be instantiable with no arguments (called by the evaluator).
-    - Must implement `predict(batch)` which receives an iterable of inputs and
-      returns a list of predictions (labels).
-    - Must implement `eval()` to place the model in evaluation mode.
-    - If you use PyTorch, submit a state_dict to be loaded via `load_state_dict`
-    """
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
+        model_name = "roberta-base"
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.model = DistilBertForSequenceClassification.from_pretrained(
-            "distilbert-base-uncased",
+        self.model = AutoModelForSequenceClassification.from_pretrained(
+            model_name,
             num_labels=2,
         )
         self.model.to(self.device)
@@ -32,13 +24,6 @@ class Model(nn.Module):
         return self
 
     def predict(self, batch: Iterable[Any]) -> List[Any]:
-        """
-        Implement your inference here.
-        Inputs:
-            batch: Iterable of preprocessed inputs (as produced by your preprocess.py)
-        Returns:
-            A list of predictions with the same length as `batch`.
-        """
         preds: List[Any] = []
         self.model.eval()
 
@@ -69,11 +54,6 @@ class Model(nn.Module):
 
 
 def get_model() -> Model:
-    """
-    Factory function required by the evaluator.
-    Returns an uninitialized model instance. The evaluator may optionally load
-    weights (if provided) before calling predict(...).
-    """
     return Model()
 
 

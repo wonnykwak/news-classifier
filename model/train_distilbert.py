@@ -16,9 +16,9 @@ import torch
 from sklearn.metrics import accuracy_score, classification_report, f1_score
 from sklearn.model_selection import train_test_split
 from torch.optim import AdamW
-from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torch.nn.utils import clip_grad_norm_
 from torch.utils.data import DataLoader, TensorDataset
-from transformers import DistilBertForSequenceClassification, DistilBertTokenizer
+from transformers import AutoModelForSequenceClassification, AutoTokenizer, get_linear_schedule_with_warmup
 
 from preprocess.preprocess import LABEL_MAP, MAX_LEN, label_df, load_data_labels
 
@@ -27,19 +27,19 @@ MODEL_NAME = "distilbert-base-uncased"
 def split_data(texts, labels, size: float, seed:int): # data splitter from sklearn
     return train_test_split(texts, labels, test_size=size, random_state=seed, stratify=labels) #stratify for class balance
 
-def build_dataset(texts: list[str], labels: list[int], tokenizer: DistilBertTokenizer):
+def build_dataset(texts: list[str], labels: list[int], tokenizer):
     encodings = tokenizer(texts, max_length=MAX_LEN, padding="max_length", truncation=True, return_tensors="pt")
     y = torch.tensor(labels, dtype=torch.long)
     return TensorDataset(encodings["input_ids"], encodings["attention_mask"], y)
 
 #handles batching and shuffling
-def loader_make(text_train, text_val, labels_train, labels_val, tokenizer: DistilBertTokenizer, batch_size: int):
+def loader_make(text_train, text_val, labels_train, labels_val, tokenizer, batch_size: int):
     train_loader = DataLoader(build_dataset(text_train, labels_train, tokenizer), batch_size=batch_size, shuffle=True) #randomize for train
     val_loader = DataLoader(build_dataset(text_val, labels_val, tokenizer), batch_size=batch_size, shuffle=False)
     return train_loader, val_loader
 
 #1 epoch: for each batch, compute loss, backpropagate and update weights
-def train_epoch(model, loader, optimizer, device: torch.device) -> float:
+def train_epoch(model, loader, optimizer, scheduler, device: torch.device, grad_clip: float) -> float:
     model.train()
     total_loss = 0.0
     total_batches = 0
@@ -52,7 +52,10 @@ def train_epoch(model, loader, optimizer, device: torch.device) -> float:
         #supervision pass
         out = model(input_ids, attention_mask=attention_mask, labels=labels)
         out.loss.backward() #backpropagate
+        if grad_clip > 0: #gradient clipping to prevent overfitting
+            clip_grad_norm_(model.parameters(), grad_clip)
         optimizer.step() 
+        scheduler.step()
 
         total_loss += float(out.loss.item())
         total_batches += 1
@@ -91,12 +94,12 @@ def evaluate(model, loader, device: torch.device, *, report: bool = False) -> di
         ),
     }
 
-def checkpoint_save(model: DistilBertForSequenceClassification, path: Path) -> None:
+def checkpoint_save(model, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     torch.save({"state_dict": model.state_dict()}, path)
     print(f"Checkpoint saved to {path}")
 
-def checkpoint_load(model: DistilBertForSequenceClassification, path: Path) -> DistilBertForSequenceClassification:
+def checkpoint_load(model, path: Path):
     model.load_state_dict(torch.load(path))
     model.eval()
     return model
@@ -113,38 +116,49 @@ def main() -> None:
     p.add_argument("--val-size", type=float, default=0.15)
     p.add_argument("--seed", type=int, default=17)
     p.add_argument("--report", action="store_true")
+    p.add_argument("--model-name", type=str, default=MODEL_NAME)
+    p.add_argument("--weight-decay", type=float, default=0.01) # L2 regularization
+    p.add_argument("--warmup-ratio", type=float, default=0.1)
+    p.add_argument("--grad-clip", type=float, default=1.0)
+    p.add_argument("--patience", type=int, default=2)
 
     args = p.parse_args()
 
     texts, labels = load_data_labels(args.csv)
     text_train, text_val, labels_train, labels_val = split_data(texts, labels, args.val_size, args.seed)
-    tokenizer = DistilBertTokenizer.from_pretrained(MODEL_NAME)
+    tokenizer = AutoTokenizer.from_pretrained(args.model_name)
     train_loader, val_loader = loader_make(text_train, text_val, labels_train, labels_val, tokenizer, batch_size=args.batch_size)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu") # use gpu if available
-    model = DistilBertForSequenceClassification.from_pretrained(MODEL_NAME, num_labels=len(LABEL_MAP))
+    model = AutoModelForSequenceClassification.from_pretrained(args.model_name, num_labels=len(LABEL_MAP))
     model.to(device)
-    optimizer = AdamW(model.parameters(), lr=args.learning_rate)
-    scheduler = ReduceLROnPlateau(optimizer, mode="max", factor=0.5, patience=1)
+    optimizer = AdamW(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
+    total_steps = len(train_loader) * args.epochs
+    warmup_steps = int(total_steps * args.warmup_ratio)
+    scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=warmup_steps, num_training_steps=total_steps)
 
     best_val_f1 = float("-inf")
+    bad_epochs = 0
 
     for epoch in range(args.epochs):
-        t_loss = train_epoch(model, train_loader, optimizer, device)
+        t_loss = train_epoch(model, train_loader, optimizer, scheduler, device, args.grad_clip)
         metrics = evaluate(model, val_loader, device, report=args.report)
         acc = metrics["val accuracy"]
         f1_macro = metrics["val f1 macro"]
         f1_weighted = metrics["val f1 weighted"]
-        scheduler.step(f1_macro)
         print(f"Epoch {epoch+1}/{args.epochs}, Train Loss: {t_loss:.4f}, Val Accuracy: {acc:.4f}, Val F1 Macro: {f1_macro:.4f}, Val F1 Weighted: {f1_weighted:.4f}")
         if f1_macro > best_val_f1:
             best_val_f1 = f1_macro
-            # checkpoint_save(model, args.out)
-            print(f"New best F1 score: {best_val_f1:.4f}! Saving checkpoint to {args.out}")
+            checkpoint_save(model, Path(args.out))
+            print(f"New best F1 score: {best_val_f1:.4f} checkpoint saved to {args.out}")
+            bad_epochs = 0
+        else:
+            bad_epochs += 1
+            if bad_epochs > args.patience:
+                break
         print("-"*50)
-    print("Training complete!")
-    checkpoint_save(model, Path(args.out))
-    print(f"checkpoint saved to {args.out}")
+    print("training done")
+    print(f"Best Val F1 Macro: {best_val_f1:.4f}; checkpoint: {args.out}")
 
 
 if __name__ == "__main__":
